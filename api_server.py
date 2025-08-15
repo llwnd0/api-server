@@ -2507,16 +2507,60 @@ async def call_lmarena_bridge_analysis(
         
         # Call LMArenaBridge API
         async with httpx.AsyncClient(timeout=LMARENA_BRIDGE_TIMEOUT) as client:
-            response = await client.post(
-                f"{LMARENA_BRIDGE_URL}/v1/chat/completions",
-                json=lmarena_request,
-                headers={"Content-Type": "application/json"}
-            )
+            # Log the request for debugging
+            debug_print(f"Sending request to LMArenaBridge: {LMARENA_BRIDGE_URL}/v1/chat/completions")
+            debug_print(f"Request payload: {json.dumps(lmarena_request, indent=2)}")
             
-            if response.status_code != 200:
+            try:
+                response = await client.post(
+                    f"{LMARENA_BRIDGE_URL}/v1/chat/completions",
+                    json=lmarena_request,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                # Log the response for debugging
+                debug_print(f"LMArenaBridge response status: {response.status_code}")
+                debug_print(f"LMArenaBridge response headers: {dict(response.headers)}")
+                
+                if response.status_code != 200:
+                    # Get the actual error response from LMArenaBridge
+                    try:
+                        error_body = response.text
+                        debug_print(f"LMArenaBridge error response: {error_body}")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"LMArenaBridge returned status {response.status_code}: {error_body}"
+                        )
+                    except Exception as parse_error:
+                        debug_print(f"Failed to parse LMArenaBridge error response: {parse_error}")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"LMArenaBridge returned status {response.status_code} with unparseable response"
+                        )
+                
+            except httpx.HTTPStatusError as e:
+                # This catches errors where LMArenaBridge returned a non-2xx status code
+                error_body = e.response.text if hasattr(e.response, 'text') else str(e)
+                debug_print(f"LMArenaBridge HTTP error: {e.response.status_code}. Response: {error_body}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"LMArenaBridge API error: {response.status_code}"
+                    detail=f"LMArenaBridge returned status {e.response.status_code}: {error_body}"
+                )
+                
+            except httpx.RequestError as e:
+                # This catches network errors like timeouts, connection refused, etc.
+                debug_print(f"LMArenaBridge connection failed: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"LMArenaBridge connection failed: {e}"
+                )
+                
+            except Exception as e:
+                # A final catch-all for any other unexpected errors
+                debug_print(f"Unexpected error during LMArenaBridge call: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Unexpected error during LMArenaBridge call: {e}"
                 )
             
             # Parse LMArenaBridge response
